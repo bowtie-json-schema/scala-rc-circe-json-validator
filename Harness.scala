@@ -67,23 +67,28 @@ class BowtieRcCirceJsonValidator {
     }
 
     val runRequest: RunRequest = decodeTo[RunRequest](node)
-    val testCase = runRequest.testCase
-    try {
-      val registry: Map[String, Json] = testCase.registry.getOrElse(Map.empty)
-      val downloader = new InMemoryDownloader(registry)
-      val validator = Loader(downloader).fromJson(testCase.schema).right.get
+    val output = runRequest.output.getOrElse("flag")
+    if (output != "flag") {
+      RunSkippedResponse(runRequest.seq, message = Some(s"Unsupported output format: $output")).asJson.noSpaces
+    } else {
+      val testCase = runRequest.testCase
+      try {
+        val registry: Map[String, Json] = testCase.registry.getOrElse(Map.empty)
+        val downloader = new InMemoryDownloader(registry)
+        val validator = Loader(downloader).fromJson(testCase.schema).right.get
 
-      var resultArray = Vector.empty[Json]
-      runRequest.testCase.tests.foreach { test =>
-        val instance: String = test.instance.noSpaces
-        val result = Json.obj("valid" -> validator.validate(test.instance).isSuccess.asJson)
-        resultArray :+= result
+        var resultArray = Vector.empty[Json]
+        runRequest.testCase.tests.foreach { test =>
+          val instance: String = test.instance.noSpaces
+          val result = Json.obj("valid" -> validator.validate(test.instance).isSuccess.asJson)
+          resultArray :+= result
+        }
+        RunResponse(runRequest.seq, resultArray).asJson.noSpaces
+      } catch {
+        case e: Exception =>
+          val error: ErrorContext = ErrorContext(e.getMessage(), e.getStackTrace().mkString("\n"))
+          RunErroredResponse(runRequest.seq, context = error).asJson.noSpaces
       }
-      RunResponse(runRequest.seq, resultArray).asJson.noSpaces
-    } catch {
-      case e: Exception =>
-        val error: ErrorContext = ErrorContext(e.getMessage(), e.getStackTrace().mkString("\n"))
-        RunErroredResponse(runRequest.seq, context = error).asJson.noSpaces
     }
   }
 
@@ -120,8 +125,8 @@ case class DialectRequest(dialect: String)
 
 case class DialectResponse(ok: Boolean)
 
-case class RunRequest(seq: Json, testCase: TestCase)
-implicit val decodeRunRequest: Decoder[RunRequest] = Decoder.forProduct2("seq", "case")(RunRequest.apply)
+case class RunRequest(seq: Json, testCase: TestCase, output: Option[String])
+implicit val decodeRunRequest: Decoder[RunRequest] = Decoder.forProduct3("seq", "case", "output")(RunRequest.apply)
 
 object RunRequest {}
 
